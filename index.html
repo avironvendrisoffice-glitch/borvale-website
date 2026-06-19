@@ -182,11 +182,53 @@ const PH = '<svg class="ph" viewBox="0 0 24 24" fill="none" stroke="#B8A055" str
 let lang = "en";
 let filter = "all";
 
+/* ---- Amazon marketplace routing ----
+   The selected language decides the target Amazon store.
+   English defaults to amazon.com (US focus). A visitor whose browser
+   region is GB is routed to amazon.co.uk on first load.
+   - Full product links (…/dp/ASIN…) are automatically rewritten to the
+     local domain.
+   - Amazon short links (a.co/…) cannot be rewritten; they stay as is and
+     rely on Amazon OneLink / Amazon's own nearest-store redirect.
+   - A design may also carry per-market links as an object, e.g.
+       link:{ com:"…", de:"…", "co.uk":"…" }
+     in which case the exact market link is used when present. */
+const LANG_TLD = { en:"com", de:"de", fr:"fr", it:"it", es:"es", ja:"co.jp" };
+let marketTLD = "com"; // current target, set on load + on language change
+
+function detectInitialMarket(navLang){
+  const l = (navLang||"en").toLowerCase();
+  if(l.startsWith("en-gb")||l==="en-ie") return "co.uk";
+  if(l.startsWith("de")) return "de";
+  if(l.startsWith("fr")) return "fr";
+  if(l.startsWith("it")) return "it";
+  if(l.startsWith("es")) return "es";
+  if(l.startsWith("ja")) return "co.jp";
+  return "com";
+}
+
+function resolveLink(d){
+  if(!d.link) return "";
+  // per-market object
+  if(typeof d.link === "object"){
+    return d.link[marketTLD] || d.link.com || d.link.default || Object.values(d.link)[0] || "";
+  }
+  const url = String(d.link).trim();
+  if(url==="") return "";
+  if(marketTLD==="com") return url;
+  // rewrite full amazon product links to the local domain
+  const m = url.match(/amazon\.[a-z.]+\/(?:.*?\/)?(?:dp|gp\/product)\/([A-Z0-9]{10})/i);
+  if(m){ return "https://www.amazon."+marketTLD+"/dp/"+m[1]; }
+  // a.co short links or anything else: leave untouched (OneLink / Amazon handles geo)
+  return url;
+}
+
 function cardHTML(d,t){
-  const has = d.link && d.link.trim()!=="";
+  const link = resolveLink(d);
+  const has = link && link.trim()!=="";
   const thumb = d.image && d.image.trim()!=="" ? `<div class="thumb"><img src="${d.image}" alt="${d.title}" loading="lazy"></div>` : `<div class="thumb">${PH}</div>`;
   const tag = `<span class="nichetag">${t[d.niche]}</span>`;
-  const btn = has ? `<a class="btn" href="${d.link}" target="_blank" rel="noopener nofollow sponsored">${t.amazon} ${ARROW}</a>` : `<a class="btn soon" aria-disabled="true">${t.soon}</a>`;
+  const btn = has ? `<a class="btn" href="${link}" target="_blank" rel="noopener nofollow sponsored">${t.amazon} ${ARROW}</a>` : `<a class="btn soon" aria-disabled="true">${t.soon}</a>`;
   return `<article class="card" data-niche="${d.niche}">${tag}${thumb}<div class="body"><h3>${d.title}</h3><p>${d.blurb||""}</p>${btn}</div></article>`;
 }
 function renderGrid(list,gridId,countId,t){
@@ -213,7 +255,7 @@ function apply(){
   renderGrid(BEST,"grid-best","count-best",t);
   renderGrid(NEW,"grid-new","count-new",t);
 }
-document.getElementById("lang").addEventListener("change",e=>{lang=e.target.value;apply();});
+document.getElementById("lang").addEventListener("change",e=>{lang=e.target.value;marketTLD=LANG_TLD[lang]||"com";apply();});
 document.getElementById("filters").addEventListener("click",e=>{
   const b=e.target.closest("button"); if(!b)return;
   filter=b.dataset.f;
@@ -272,11 +314,13 @@ function acceptCookie(){
 }
 function initCookie(){ if(getCookie("borvale_consent")!=="1"){ document.getElementById("cookie").classList.add("show"); } }
 
-/* init: detect browser language among supported */
+/* init: detect browser language + region for marketplace */
 (function(){
   const supported=["en","de","fr","it","es","ja"];
-  const nav=(navigator.language||"en").slice(0,2).toLowerCase();
+  const full=(navigator.language||"en").toLowerCase();
+  const nav=full.slice(0,2);
   lang = supported.includes(nav)?nav:"en";
+  marketTLD = detectInitialMarket(full);
   document.getElementById("lang").value=lang;
   apply(); initCookie();
 })();
